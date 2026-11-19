@@ -45,12 +45,38 @@ jobs:
             exit 1
           fi
 
-          curl --fail --silent --show-error \
-            -X POST \
-            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-            -d "chat_id=${TELEGRAM_CHAT_ID}" \
-            --data-urlencode "text=🎬 AFTERFRAME — НОВАЯ ИСТОРИЯ
+          export STORY
 
-          ${STORY}"
+python3 -c '
+import os, json
+text = os.environ["STORY"]
+chunks = [text[i:i+3500] for i in range(0, len(text), 3500)]
+json.dump(chunks, open("chunks.json", "w"), ensure_ascii=False)
+'
 
-          echo "Story generated and sent to Telegram."
+COUNT=$(jq 'length' chunks.json)
+
+for i in $(seq 0 $((COUNT - 1))); do
+  PART=$(jq -r ".[$i]" chunks.json)
+
+  if [ "$i" -eq 0 ]; then
+    PART="🎬 AFTERFRAME — НОВАЯ ИСТОРИЯ
+
+$PART"
+  fi
+
+  HTTP_CODE=$(curl -sS -w "%{http_code}" \
+    -X POST \
+    "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+    -d "chat_id=${TELEGRAM_CHAT_ID}" \
+    --data-urlencode "text=${PART}" \
+    -o telegram_response.json)
+
+  if [ "$HTTP_CODE" != "200" ] || [ "$(jq -r '.ok' telegram_response.json)" != "true" ]; then
+    echo "Telegram error: $HTTP_CODE"
+    cat telegram_response.json
+    exit 1
+  fi
+done
+
+echo "Story generated and sent to Telegram."
