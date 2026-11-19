@@ -1,0 +1,55 @@
+
+name: AFTERFRAME Agnes Video Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  video-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate test video
+        env:
+          AGNES_API_KEY: ${{ secrets.AGNES_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          set -euo pipefail
+
+          cat > request.json <<'JSON'
+          {
+            "model": "agnes-video-2.5-flash",
+            "prompt": "A mysterious young man standing alone on an empty futuristic city street at night, heavy rain falling, blue and purple neon reflections on wet pavement, cinematic atmosphere, volumetric fog, subtle camera movement slowly approaching the character, highly detailed cinematic 3D animation, no dialogue, no text, no music",
+            "seconds": "4",
+            "mode": "text",
+            "size": "720P",
+            "aspect_ratio": "9:16",
+            "n": 1
+          }
+          JSON
+
+          HTTP_CODE=$(curl -sS -w "%{http_code}" \
+            -X POST "https://apihub.agnes-ai.com/v1/videos" \
+            -H "Authorization: Bearer ${AGNES_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d @request.json \
+            -o response.json)
+
+          echo "HTTP status: $HTTP_CODE"
+          cat response.json
+
+          if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+            echo "Video task creation failed."
+            exit 1
+          fi
+
+          VIDEO_ID=$(jq -r '.video_id // empty' response.json)
+
+          if [ -z "$VIDEO_ID" ]; then
+            echo "No video_id returned."
+            exit 1
+          fi
+
+          echo "Video task created successfully."
+          echo "VIDEO_ID=$VIDEO_ID"
+          
