@@ -1,0 +1,53 @@
+
+name: AFTERFRAME Story Generator
+
+on:
+  workflow_dispatch:
+
+jobs:
+  create-story:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate story with Gemini
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          set -euo pipefail
+
+          cat > request.json <<'JSON'
+          {
+            "model": "gemini-3.8-flash",
+            "input": "Ты сценарист оригинальной анимационной антологии AFTERFRAME. Придумай одну совершенно оригинальную самостоятельную историю для вертикального видео ровно 59 секунд, формат 9:16. Напиши ответ на русском языке. Структура: название; жанр и визуальный стиль; краткая идея; полный текст спокойного закадрового рассказчика; затем 6 сцен с точным временем начала и конца, описанием изображения, движения камеры и звуковых эффектов. Все 6 сцен вместе должны занимать ровно 59 секунд, без пробелов и пересечений. История должна иметь сильное начало, развитие, неожиданный финал. Не используй известных персонажей, чужие франшизы и заимствованные сюжеты. Персонажи не говорят в кадре. Музыку пока не создавай. Не добавляй пояснений вне структуры."
+          }
+          JSON
+
+          curl --fail --silent --show-error \
+            -X POST \
+            "https://generativelanguage.googleapis.com/v1beta/interactions" \
+            -H "x-goog-api-key: ${GEMINI_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -H "Api-Revision: 2026-05-20" \
+            -d @request.json \
+            -o response.json
+
+          STORY=$(jq -r '[.steps[] | select(.type == "model_output") | .content[]? | select(.type == "text") | .text] | join("\n")' response.json)
+
+          if [ -z "$STORY" ] || [ "$STORY" = "null" ]; then
+            echo "Gemini did not return story text"
+            cat response.json
+            exit 1
+          fi
+
+          printf '%s' "$STORY" > story.txt
+
+          curl --fail --silent --show-error \
+            -X POST \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=🎬 AFTERFRAME — НОВАЯ ИСТОРИЯ
+
+          ${STORY}"
+
+          echo "Story generated and sent to Telegram."
