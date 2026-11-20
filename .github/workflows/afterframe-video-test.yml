@@ -1,0 +1,113 @@
+
+name: AFTERFRAME Video Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_paid_generation:
+        description: "I approve one paid video generation (~$0.50)"
+        required: true
+        type: boolean
+        default: false
+
+jobs:
+  generate-video:
+    if: ${{ inputs.confirm_paid_generation == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Generate video with Replicate
+        env:
+          REPLICATE_API_TOKEN: ${{ secrets.REPLICATE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          echo "Starting AFTERFRAME video generation..."
+
+          RESPONSE=$(curl -sS -X POST \
+            "https://api.replicate.com/v1/models/minimax/video-01/predictions" \
+            -H "Authorization: Bearer $REPLICATE_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: wait=60" \
+            -d '{
+              "input": {
+                "prompt": "A cinematic animated short film scene. A mysterious futuristic city at night, glowing neon lights, gentle rain, atmospheric fog, a lone character walking through the empty street. Beautiful detailed animation, smooth camera movement, dramatic lighting. No dialogue, no subtitles, no text, no music.",
+                "prompt_optimizer": true
+              }
+            }')
+
+          ID=$(echo "$RESPONSE" | jq -r '.id // empty')
+
+          if [ -z "$ID" ]; then
+            echo "Replicate did not return a prediction ID."
+            echo "$RESPONSE" | jq '{detail, title, status}'
+            exit 1
+          fi
+
+          echo "Prediction created."
+
+          for i in $(seq 1 45); do
+            RESPONSE=$(curl -sS \
+              -H "Authorization: Bearer $REPLICATE_API_TOKEN" \
+              "https://api.replicate.com/v1/predictions/$ID")
+
+            STATUS=$(echo "$RESPONSE" | jq -r '.status // empty')
+            echo "Generation status: $STATUS"
+
+            if [ "$STATUS" = "succeeded" ]; then
+              break
+            fi
+
+            if [ "$STATUS" = "failed" ] || [ "$STATUS" = "canceled" ]; then
+              echo "$RESPONSE" | jq -r '.error // "Generation failed"'
+              exit 1
+            fi
+
+            sleep 10
+          done
+
+          if [ "$STATUS" != "succeeded" ]; then
+            echo "Generation timed out."
+            exit 1
+          fi
+
+          VIDEO_URL=$(echo "$RESPONSE" | jq -r '
+            .output |
+            if type == "array" then .[0]
+            elif type == "string" then .
+            elif type == "object" then (.video // .url // empty)
+            else empty end
+          ')
+
+          if [ -z "$VIDEO_URL" ] || [ "$VIDEO_URL" = "null" ]; then
+            echo "Video URL not found."
+            exit 1
+          fi
+
+          curl -L -f \
+            -H "Authorization: Bearer $REPLICATE_API_TOKEN" \
+            "$VIDEO_URL" -o afterframe-test.mp4
+
+          echo "Video successfully downloaded."
+
+      - name: Send video to Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          set -euo pipefail
+
+          RESPONSE=$(curl -sS -X POST \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendVideo" \
+            -F "chat_id=${TELEGRAM_CHAT_ID}" \
+            -F "video=@afterframe-test.mp4" \
+            -F "caption=AFTERFRAME VIDEO AI - Test scene")
+
+          if [ "$(echo "$RESPONSE" | jq -r '.ok')" != "true" ]; then
+            echo "Telegram delivery failed."
+            echo "$RESPONSE" | jq '.description'
+            exit 1
+          fi
+
+          echo "AFTERFRAME video delivered to Telegram!"
