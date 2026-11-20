@@ -86,8 +86,8 @@ jobs:
           fi
 
           curl -L -f \
-            -H "Authorization: Bearer $REPLICATE_API_TOKEN" \
-            "$VIDEO_URL" -o afterframe-test.mp4
+          
+           "$VIDEO_URL" -o afterframe-test.mp4
 
           echo "Video successfully downloaded."
 
