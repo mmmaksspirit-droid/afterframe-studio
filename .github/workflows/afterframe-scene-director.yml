@@ -1,0 +1,123 @@
+
+name: AFTERFRAME Scene Director
+
+on:
+  workflow_dispatch:
+    inputs:
+      story:
+        description: "Paste the finished AFTERFRAME story here"
+        required: true
+        type: string
+
+jobs:
+  create-scene-plan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Generate scene plan with Gemini
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          STORY_TEXT: ${{ inputs.story }}
+        run: |
+          set -e
+
+          INSTRUCTION='You are AFTERFRAME SCENE DIRECTOR.
+
+          Turn the supplied story into a professional animation production plan.
+
+          IMPORTANT RULES:
+          - The episode must be exactly 59 seconds.
+          - Create exactly 10 shots.
+          - Shot durations must be whole numbers and add up to exactly 59 seconds.
+          - Each shot duration must be between 4 and 8 seconds.
+          - Calculate start_second so shots follow each other without gaps or overlaps.
+          - Choose a distinctive visual art style suitable for THIS story. Different episodes must be allowed to use completely different styles.
+          - Keep character appearance and location appearance consistent within this episode only.
+          - Write video prompts in detailed English.
+          - Write voiceover narration in Russian.
+          - No character dialogue, no subtitles, no visible text, no generated music.
+          - The narration is added separately during editing.
+          - Describe camera movement, character movement, lighting, atmosphere and action.
+          - Do not invent extra plot events that contradict the story.
+
+          Return ONLY valid JSON. No markdown fences and no explanations.
+
+          Required JSON structure:
+          {
+            "episode_title": "title",
+            "visual_style": "style name",
+            "style_description": "detailed style description",
+            "total_duration_seconds": 59,
+            "characters": [
+              {
+                "name": "character name",
+                "visual_description": "consistent appearance"
+              }
+            ],
+            "locations": [
+              {
+                "name": "location name",
+                "visual_description": "environment description"
+              }
+            ],
+            "shots": [
+              {
+                "shot_number": 1,
+                "start_second": 0,
+                "duration_seconds": 6,
+                "action": "what happens",
+                "camera": "camera angle and movement",
+                "video_prompt_en": "complete English video generation prompt",
+                "negative_prompt_en": "things to avoid",
+                "voiceover_ru": "Russian narration for this shot"
+              }
+            ]
+          }'
+
+          jq -n \
+            --arg model "gemini-3.8-flash" \
+            --arg instruction "$INSTRUCTION" \
+            --arg story "$STORY_TEXT" \
+            '{model:$model,input:($instruction + "\n\nSTORY:\n" + $story)}' \
+            > request.json
+
+          curl --fail-with-body -sS \
+            -X POST "https://generativelanguage.googleapis.com/v1beta/interactions" \
+            -H "Content-Type: application/json" \
+            -H "x-goog-api-key: $GEMINI_API_KEY" \
+            -d @request.json \
+            -o response.json
+
+          jq -r '[.steps[]? | select(.type == "model_output") | .content[]? | select(.type == "text") | .text] | join("\n")' response.json > model_output.txt
+
+          sed '/^[[:space:]]*```/d' model_output.txt > scene-plan.json
+
+          jq -e '
+            .total_duration_seconds == 59 and
+            (.shots | length) == 10 and
+            ([.shots[].duration_seconds] | add) == 59 and
+            all(.shots[]; .duration_seconds >= 4 and .duration_seconds <= 8)
+          ' scene-plan.json > /dev/null
+
+          echo "Scene plan successfully created and validated!"
+          jq '{episode_title, visual_style, total_duration_seconds, shots_count: (.shots | length)}' scene-plan.json
+
+      - name: Send scene plan to Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          set -e
+
+          curl --fail-with-body -sS \
+            -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
+            -F "chat_id=${TELEGRAM_CHAT_ID}" \
+            -F "document=@scene-plan.json" \
+            -F "caption=AFTERFRAME SCENE DIRECTOR: Your 59-second production plan is ready!"
+
+      - name: Save scene plan as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: afterframe-scene-plan
+          path: scene-plan.json
+          retention-days: 7
