@@ -1,0 +1,74 @@
+
+name: AFTERFRAME Editor Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-editor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Create test scenes
+        run: |
+          mkdir -p test-scenes
+
+          ffmpeg -y -f lavfi \
+            -i "color=c=blue:s=720x1280:r=30:d=20" \
+            -c:v libx264 -pix_fmt yuv420p \
+            test-scenes/scene1.mp4
+
+          ffmpeg -y -f lavfi \
+            -i "color=c=purple:s=720x1280:r=30:d=20" \
+            -c:v libx264 -pix_fmt yuv420p \
+            test-scenes/scene2.mp4
+
+          ffmpeg -y -f lavfi \
+            -i "color=c=black:s=720x1280:r=30:d=20" \
+            -c:v libx264 -pix_fmt yuv420p \
+            test-scenes/scene3.mp4
+
+      - name: Run AFTERFRAME Editor
+        run: |
+          chmod +x scripts/afterframe-editor.sh
+          bash scripts/afterframe-editor.sh \
+            test-scenes/scene1.mp4 \
+            test-scenes/scene2.mp4 \
+            test-scenes/scene3.mp4
+
+      - name: Verify final video
+        run: |
+          DURATION=$(ffprobe -v error \
+            -show_entries format=duration \
+            -of default=noprint_wrappers=1:nokey=1 \
+            afterframe-final.mp4)
+
+          SIZE=$(ffprobe -v error \
+            -select_streams v:0 \
+            -show_entries stream=width,height \
+            -of csv=s=x:p=0 afterframe-final.mp4)
+
+          echo "Duration: $DURATION"
+          echo "Resolution: $SIZE"
+
+          awk -v d="$DURATION" \
+            'BEGIN { exit !(d >= 58.9 && d <= 59.1) }'
+
+          test "$SIZE" = "720x1280"
+
+          echo "AFTERFRAME EDITOR TEST SUCCESSFUL!"
+
+      - name: Save test video
+        uses: actions/upload-artifact@v4
+        with:
+          name: afterframe-editor-test
+          path: afterframe-final.mp4
