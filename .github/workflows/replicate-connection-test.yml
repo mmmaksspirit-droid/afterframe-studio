@@ -1,0 +1,25 @@
+
+name: AFTERFRAME Replicate Connection Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-connection:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check Replicate API
+        env:
+          REPLICATE_API_TOKEN: ${{ secrets.REPLICATE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          RESPONSE=$(curl -fsS \
+            -H "Authorization: Bearer $REPLICATE_API_TOKEN" \
+            https://api.replicate.com/v1/account)
+
+          echo "$RESPONSE" | jq '{type, username, name}'
+
+          echo "AFTERFRAME: Replicate connection successful!"
+
