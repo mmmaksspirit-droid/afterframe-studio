@@ -81,12 +81,40 @@ jobs:
             '{model:$model,input:($instruction + "\n\nSTORY:\n" + $story)}' \
             > request.json
 
-          curl --fail-with-body -sS \
-            -X POST "https://generativelanguage.googleapis.com/v1beta/interactions" \
-            -H "Content-Type: application/json" \
-            -H "x-goog-api-key: $GEMINI_API_KEY" \
-            -d @request.json \
-            -o response.json
+          
+for attempt in 1 2 3 4 5; do
+  echo "Gemini request attempt $attempt of 5"
+
+  HTTP_CODE=$(curl -sS \
+    -o response.json \
+    -w "%{http_code}" \
+    -X POST "https://generativelanguage.googleapis.com/v1beta/interactions" \
+    -H "Content-Type: application/json" \
+    -H "x-goog-api-key: $GEMINI_API_KEY" \
+    -d @request.json || true)
+
+  if [[ "$HTTP_CODE" =~ ^2[0-9][0-9]$ ]]; then
+    echo "Gemini request successful!"
+    break
+  fi
+
+  if [[ "$HTTP_CODE" == "429" || "$HTTP_CODE" =~ ^5[0-9][0-9]$ || "$HTTP_CODE" == "000" ]]; then
+    if [[ "$attempt" == "5" ]]; then
+      echo "Gemini failed after 5 attempts."
+      cat response.json
+      exit 1
+    fi
+
+    WAIT=$((attempt * 15))
+    echo "Temporary error $HTTP_CODE. Waiting ${WAIT}s..."
+    sleep "$WAIT"
+  else
+    echo "Gemini returned HTTP $HTTP_CODE"
+    cat response.json
+    exit 1
+    fi
+        done
+
 
           jq -r '[.steps[]? | select(.type == "model_output") | .content[]? | select(.type == "text") | .text] | join("\n")' response.json > model_output.txt
 
