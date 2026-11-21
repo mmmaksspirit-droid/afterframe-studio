@@ -12,6 +12,7 @@ on:
 jobs:
   create-scene-plan:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Generate scene plan with Gemini
@@ -19,30 +20,30 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           STORY_TEXT: ${{ inputs.story }}
         run: |
-          set -e
+          set -euo pipefail
 
           INSTRUCTION='You are AFTERFRAME SCENE DIRECTOR.
 
           Turn the supplied story into a professional animation production plan.
 
-          IMPORTANT RULES:
-          - The episode must be exactly 59 seconds.
+          RULES:
+          - Episode duration must be exactly 59 seconds.
           - Create exactly 10 shots.
-          - Shot durations must be whole numbers and add up to exactly 59 seconds.
-          - Each shot duration must be between 4 and 8 seconds.
-          - Calculate start_second so shots follow each other without gaps or overlaps.
-          - Choose a distinctive visual art style suitable for THIS story. Different episodes must be allowed to use completely different styles.
-          - Keep character appearance and location appearance consistent within this episode only.
-          - Write video prompts in detailed English.
+          - Each shot duration must be a whole number between 4 and 8 seconds.
+          - All shot durations must add up to exactly 59 seconds.
+          - Start seconds must be sequential with no gaps or overlaps.
+          - Choose a distinctive visual style suitable for this story.
+          - Different episodes must be allowed to use completely different visual styles.
+          - Keep character and location appearance consistent within this episode only.
+          - Write detailed video generation prompts in English.
           - Write voiceover narration in Russian.
-          - No character dialogue, no subtitles, no visible text, no generated music.
-          - The narration is added separately during editing.
-          - Describe camera movement, character movement, lighting, atmosphere and action.
-          - Do not invent extra plot events that contradict the story.
+          - No character dialogue, subtitles, visible text or generated music.
+          - Describe camera movement, character movement, lighting and atmosphere.
+          - Do not contradict the supplied story.
 
-          Return ONLY valid JSON. No markdown fences and no explanations.
+          Return ONLY valid JSON.
 
-          Required JSON structure:
+          Required structure:
           {
             "episode_title": "title",
             "visual_style": "style name",
@@ -51,13 +52,13 @@ jobs:
             "characters": [
               {
                 "name": "character name",
-                "visual_description": "consistent appearance"
+                "visual_description": "appearance"
               }
             ],
             "locations": [
               {
                 "name": "location name",
-                "visual_description": "environment description"
+                "visual_description": "environment"
               }
             ],
             "shots": [
@@ -67,9 +68,9 @@ jobs:
                 "duration_seconds": 6,
                 "action": "what happens",
                 "camera": "camera angle and movement",
-                "video_prompt_en": "complete English video generation prompt",
+                "video_prompt_en": "complete English video prompt",
                 "negative_prompt_en": "things to avoid",
-                "voiceover_ru": "Russian narration for this shot"
+                "voiceover_ru": "Russian narration"
               }
             ]
           }'
@@ -81,42 +82,56 @@ jobs:
             '{model:$model,input:($instruction + "\n\nSTORY:\n" + $story)}' \
             > request.json
 
-          
-for attempt in 1 2 3 4 5; do
-  echo "Gemini request attempt $attempt of 5"
+          SUCCESS=false
 
-  HTTP_CODE=$(curl -sS \
-    -o response.json \
-    -w "%{http_code}" \
-    -X POST "https://generativelanguage.googleapis.com/v1beta/interactions" \
-    -H "Content-Type: application/json" \
-    -H "x-goog-api-key: $GEMINI_API_KEY" \
-    -d @request.json || true)
+          for attempt in 1 2 3 4 5; do
+            echo "Gemini request attempt $attempt of 5"
 
-  if [[ "$HTTP_CODE" =~ ^2[0-9][0-9]$ ]]; then
-    echo "Gemini request successful!"
-    break
-  fi
+            HTTP_CODE=$(curl -sS \
+              --connect-timeout 20 \
+              --max-time 180 \
+              -o response.json \
+              -w "%{http_code}" \
+              -X POST "https://generativelanguage.googleapis.com/v1beta/interactions" \
+              -H "Content-Type: application/json" \
+              -H "x-goog-api-key: $GEMINI_API_KEY" \
+              -d @request.json || true)
 
-  if [[ "$HTTP_CODE" == "429" || "$HTTP_CODE" =~ ^5[0-9][0-9]$ || "$HTTP_CODE" == "000" ]]; then
-    if [[ "$attempt" == "5" ]]; then
-      echo "Gemini failed after 5 attempts."
-      cat response.json
-      exit 1
-    fi
+            if [[ "$HTTP_CODE" =~ ^2[0-9][0-9]$ ]]; then
+              SUCCESS=true
+              echo "Gemini request successful!"
+              break
+            fi
 
-    WAIT=$((attempt * 15))
-    echo "Temporary error $HTTP_CODE. Waiting ${WAIT}s..."
-    sleep "$WAIT"
-  else
-    echo "Gemini returned HTTP $HTTP_CODE"
-    cat response.json
-    exit 1
-    fi
-        done
+            if [[ "$HTTP_CODE" == "429" || "$HTTP_CODE" =~ ^5[0-9][0-9]$ || "$HTTP_CODE" == "000" ]]; then
+              if [[ "$attempt" == "5" ]]; then
+                echo "Gemini failed after 5 attempts."
+                cat response.json
+                exit 1
+              fi
 
+              WAIT=$((attempt * 20))
+              echo "Temporary error $HTTP_CODE. Waiting ${WAIT} seconds..."
+              sleep "$WAIT"
+            else
+              echo "Gemini returned HTTP $HTTP_CODE"
+              cat response.json
+              exit 1
+            fi
+          done
 
-          jq -r '[.steps[]? | select(.type == "model_output") | .content[]? | select(.type == "text") | .text] | join("\n")' response.json > model_output.txt
+          if [[ "$SUCCESS" != "true" ]]; then
+            echo "Gemini request unsuccessful."
+            exit 1
+          fi
+
+          jq -r '
+            [.steps[]? |
+            select(.type == "model_output") |
+            .content[]? |
+            select(.type == "text") |
+            .text] | join("\n")
+          ' response.json > model_output.txt
 
           sed '/^[[:space:]]*```/d' model_output.txt > scene-plan.json
 
@@ -124,18 +139,31 @@ for attempt in 1 2 3 4 5; do
             .total_duration_seconds == 59 and
             (.shots | length) == 10 and
             ([.shots[].duration_seconds] | add) == 59 and
-            all(.shots[]; .duration_seconds >= 4 and .duration_seconds <= 8)
+            all(.shots[];
+              .duration_seconds >= 4 and
+              .duration_seconds <= 8
+            ) and
+            ([.shots[].start_second] ==
+              ([0] + ([.shots[0:-1][] |
+                .start_second + .duration_seconds]))
+            )
           ' scene-plan.json > /dev/null
 
-          echo "Scene plan successfully created and validated!"
-          jq '{episode_title, visual_style, total_duration_seconds, shots_count: (.shots | length)}' scene-plan.json
+          echo "AFTERFRAME SCENE DIRECTOR completed successfully!"
+
+          jq '{
+            episode_title,
+            visual_style,
+            total_duration_seconds,
+            shots_count: (.shots | length)
+          }' scene-plan.json
 
       - name: Send scene plan to Telegram
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          set -e
+          set -euo pipefail
 
           curl --fail-with-body -sS \
             -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
