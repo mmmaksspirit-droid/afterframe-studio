@@ -85,11 +85,9 @@ jobs:
             exit 1
           fi
 
-          curl -L -f \
-          
-           "$VIDEO_URL" -o afterframe-test.mp4
-
-          echo "Video successfully downloaded."
+          curl -L -f "$VIDEO_URL" -o afterframe-test.mp4
+        
+             echo "Video successfully downloaded."
 
       - name: Send video to Telegram
         env:
