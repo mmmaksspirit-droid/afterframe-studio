@@ -10,22 +10,29 @@ jobs:
     timeout-minutes: 5
 
     steps:
-      - name: Download test MP4
+      - name: Create test MP4
         run: |
           set -euo pipefail
 
-          echo "Starting free MP4 download test..."
+          echo "Installing FFmpeg..."
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
 
-          curl --fail-with-body -L -sS \
-            "https://www.w3schools.com/html/mov_bbb.mp4" \
-            -o afterframe-test.mp4
+          echo "Creating test video..."
 
-          if [ ! -s afterframe-test.mp4 ]; then
-            echo "Downloaded file is empty."
-            exit 1
-          fi
+          ffmpeg -y \
+            -f lavfi \
+            -i "color=c=0x252050:s=360x640:r=24" \
+            -t 3 \
+            -an \
+            -c:v libx264 \
+            -pix_fmt yuv420p \
+            -movflags +faststart \
+            afterframe-test.mp4
 
-          echo "MP4 downloaded successfully."
+          test -s afterframe-test.mp4
+
+          echo "Test MP4 created successfully."
           ls -lh afterframe-test.mp4
 
       - name: Send video to Telegram
@@ -40,7 +47,7 @@ jobs:
             "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendVideo" \
             -F "chat_id=${TELEGRAM_CHAT_ID}" \
             -F "video=@afterframe-test.mp4" \
-            -F "caption=AFTERFRAME: Free download test successful!"
+            -F "caption=AFTERFRAME: Free MP4 test successful!"
 
           echo "Telegram delivery completed."
 
