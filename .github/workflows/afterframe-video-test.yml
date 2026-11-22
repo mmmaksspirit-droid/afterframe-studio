@@ -17,7 +17,7 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - name: Generate and download video with Replicate
+      - name: Generate and immediately download video
         env:
           REPLICATE_API_TOKEN: ${{ secrets.REPLICATE_API_TOKEN }}
         run: |
@@ -32,7 +32,7 @@ jobs:
             -H "Prefer: wait=60" \
             -d '{
               "input": {
-                "prompt": "A cinematic animated short film scene. A mysterious futuristic city at night, glowing neon lights, gentle rain, atmospheric fog, a lone character walking through an empty street. Beautiful detailed animation, smooth camera movement, dramatic lighting. No dialogue, no subtitles, no text, no music.",
+                "prompt": "A cinematic animated short film scene. A mysterious futuristic city at night, glowing neon lights, gentle rain, atmospheric fog, a lone character walking through an empty street. Premium detailed animation, smooth camera movement, dramatic lighting. No dialogue, no subtitles, no text, no music.",
                 "prompt_optimizer": true
               }
             }')
@@ -43,8 +43,8 @@ jobs:
           STATUS=$(echo "$RESPONSE" | jq -r '.status // empty')
 
           if [ -z "$ID" ]; then
-            echo "Prediction ID was not returned."
-            echo "$RESPONSE" | jq '{detail, title, status}'
+            echo "ERROR: Prediction ID not found."
+            jq '{detail, title, status}' prediction.json
             exit 1
           fi
 
@@ -58,7 +58,7 @@ jobs:
 
             if [ "$STATUS" = "failed" ] || [ "$STATUS" = "canceled" ]; then
               echo "Generation failed."
-              cat prediction.json
+              jq '{status, error}' prediction.json
               exit 1
             fi
 
@@ -75,46 +75,49 @@ jobs:
           done
 
           if [ "$STATUS" != "succeeded" ]; then
-            echo "Generation timed out."
+            echo "ERROR: Generation timed out."
             exit 1
           fi
 
-          echo "Generation succeeded."
+          echo "Generation succeeded!"
 
           VIDEO_URL=$(jq -r '
-            .output as $o |
-            if ($o | type) == "string" then $o
-            elif ($o | type) == "array" then
-              $o[0] |
+            def extract_url:
               if type == "string" then .
               elif type == "object" then
                 (.url // .video.url // .video // empty)
-              else empty end
+              else empty end;
+
+            .output as $o |
+            if ($o | type) == "array" then
+              ($o[0] | extract_url)
             elif ($o | type) == "object" then
-              (.url // .video.url // .video // empty)
+              ($o | extract_url)
+            elif ($o | type) == "string" then
+              $o
             else empty end
           ' prediction.json)
 
           if [ -z "$VIDEO_URL" ] || [[ "$VIDEO_URL" != https://* ]]; then
-            echo "Video URL was not found."
+            echo "ERROR: Video URL not found."
             echo "Replicate output:"
             jq '.output' prediction.json
             exit 1
           fi
 
           echo "Video URL received."
-          echo "Downloading MP4 immediately..."
+          echo "Downloading video immediately..."
 
           curl --fail-with-body -L -sS \
             "$VIDEO_URL" \
             -o afterframe-test.mp4
 
           if [ ! -s afterframe-test.mp4 ]; then
-            echo "Downloaded file is empty."
+            echo "ERROR: MP4 is empty."
             exit 1
           fi
 
-          echo "Video downloaded successfully."
+          echo "MP4 downloaded successfully."
           ls -lh afterframe-test.mp4
 
       - name: Send video to Telegram
@@ -134,12 +137,13 @@ jobs:
 
           echo "Video sent to Telegram."
 
-      - name: Save generated video
-        if: always() && hashFiles('afterframe-test.mp4') != ''
+      - name: Save video and prediction data
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: afterframe-generated-video
+          name: afterframe-video-backup
           path: |
             afterframe-test.mp4
             prediction.json
+          if-no-files-found: warn
           retention-days: 7
