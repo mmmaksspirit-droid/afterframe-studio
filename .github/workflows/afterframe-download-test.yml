@@ -1,0 +1,52 @@
+
+name: AFTERFRAME Download Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  download-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Download test MP4
+        run: |
+          set -euo pipefail
+
+          echo "Starting free MP4 download test..."
+
+          curl --fail-with-body -L -sS \
+            "https://www.w3schools.com/html/mov_bbb.mp4" \
+            -o afterframe-test.mp4
+
+          if [ ! -s afterframe-test.mp4 ]; then
+            echo "Downloaded file is empty."
+            exit 1
+          fi
+
+          echo "MP4 downloaded successfully."
+          ls -lh afterframe-test.mp4
+
+      - name: Send video to Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          set -euo pipefail
+
+          curl --fail-with-body -sS \
+            -X POST \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendVideo" \
+            -F "chat_id=${TELEGRAM_CHAT_ID}" \
+            -F "video=@afterframe-test.mp4" \
+            -F "caption=AFTERFRAME: Free download test successful!"
+
+          echo "Telegram delivery completed."
+
+      - name: Save MP4 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: afterframe-download-test
+          path: afterframe-test.mp4
+          retention-days: 7
