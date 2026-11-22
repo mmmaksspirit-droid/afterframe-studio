@@ -17,7 +17,7 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - name: Generate video with Replicate
+      - name: Generate and download video with Replicate
         env:
           REPLICATE_API_TOKEN: ${{ secrets.REPLICATE_API_TOKEN }}
         run: |
@@ -25,40 +25,40 @@ jobs:
 
           echo "Starting AFTERFRAME video generation..."
 
-          RESPONSE=$(curl --fail-with-body -sS \
-            -X POST \
+          RESPONSE=$(curl --fail-with-body -sS -X POST \
             "https://api.replicate.com/v1/models/minimax/video-01/predictions" \
             -H "Authorization: Bearer $REPLICATE_API_TOKEN" \
             -H "Content-Type: application/json" \
             -H "Prefer: wait=60" \
             -d '{
               "input": {
-                "prompt": "A cinematic animated short film scene. A mysterious futuristic city at night, glowing neon lights, gentle rain, atmospheric fog, a lone character walking through the empty street. Beautiful detailed animation, smooth camera movement, dramatic lighting. No dialogue, no subtitles, no text, no music.",
+                "prompt": "A cinematic animated short film scene. A mysterious futuristic city at night, glowing neon lights, gentle rain, atmospheric fog, a lone character walking through an empty street. Beautiful detailed animation, smooth camera movement, dramatic lighting. No dialogue, no subtitles, no text, no music.",
                 "prompt_optimizer": true
               }
             }')
 
+          echo "$RESPONSE" > prediction.json
+
           ID=$(echo "$RESPONSE" | jq -r '.id // empty')
+          STATUS=$(echo "$RESPONSE" | jq -r '.status // empty')
 
           if [ -z "$ID" ]; then
-            echo "Replicate did not return a prediction ID."
+            echo "Prediction ID was not returned."
             echo "$RESPONSE" | jq '{detail, title, status}'
             exit 1
           fi
 
-          echo "Prediction created."
+          echo "Prediction ID: $ID"
+          echo "Initial status: $STATUS"
 
-          STATUS=$(echo "$RESPONSE" | jq -r '.status // empty')
-
-          for i in $(seq 1 45); do
-
+          for i in {1..45}; do
             if [ "$STATUS" = "succeeded" ]; then
               break
             fi
 
             if [ "$STATUS" = "failed" ] || [ "$STATUS" = "canceled" ]; then
               echo "Generation failed."
-              echo "$RESPONSE" | jq -r '.error // "Unknown error"'
+              cat prediction.json
               exit 1
             fi
 
@@ -68,6 +68,7 @@ jobs:
               -H "Authorization: Bearer $REPLICATE_API_TOKEN" \
               "https://api.replicate.com/v1/predictions/$ID")
 
+            echo "$RESPONSE" > prediction.json
             STATUS=$(echo "$RESPONSE" | jq -r '.status // empty')
 
             echo "Generation status: $STATUS"
@@ -78,67 +79,67 @@ jobs:
             exit 1
           fi
 
-          echo "Video generation succeeded!"
+          echo "Generation succeeded."
 
-          VIDEO_URL=$(echo "$RESPONSE" | jq -r '
-            .output |
-            if type == "array" then .[0]
-            elif type == "string" then .
-            elif type == "object" then
-              (.video.url // .video // .url // empty)
+          VIDEO_URL=$(jq -r '
+            .output as $o |
+            if ($o | type) == "string" then $o
+            elif ($o | type) == "array" then
+              $o[0] |
+              if type == "string" then .
+              elif type == "object" then
+                (.url // .video.url // .video // empty)
+              else empty end
+            elif ($o | type) == "object" then
+              (.url // .video.url // .video // empty)
             else empty end
-          ')
+          ' prediction.json)
 
-          if [ -z "$VIDEO_URL" ] || [ "$VIDEO_URL" = "null" ]; then
-            echo "Video URL not found in Replicate output."
-            echo "Output structure:"
-            echo "$RESPONSE" | jq '.output'
+          if [ -z "$VIDEO_URL" ] || [[ "$VIDEO_URL" != https://* ]]; then
+            echo "Video URL was not found."
+            echo "Replicate output:"
+            jq '.output' prediction.json
             exit 1
           fi
 
-          if [[ "$VIDEO_URL" != https://* ]]; then
-            echo "Invalid video URL."
-            exit 1
-          fi
-
-          echo "Downloading generated video..."
+          echo "Video URL received."
+          echo "Downloading MP4 immediately..."
 
           curl --fail-with-body -L -sS \
             "$VIDEO_URL" \
             -o afterframe-test.mp4
 
           if [ ! -s afterframe-test.mp4 ]; then
-            echo "Downloaded video is empty."
+            echo "Downloaded file is empty."
             exit 1
           fi
 
-          echo "Video successfully downloaded."
+          echo "Video downloaded successfully."
+          ls -lh afterframe-test.mp4
 
       - name: Send video to Telegram
+        if: success()
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           set -euo pipefail
 
-          RESPONSE=$(curl --fail-with-body -sS \
+          curl --fail-with-body -sS \
             -X POST \
             "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendVideo" \
             -F "chat_id=${TELEGRAM_CHAT_ID}" \
             -F "video=@afterframe-test.mp4" \
-            -F "caption=AFTERFRAME VIDEO AI - Test scene")
+            -F "caption=AFTERFRAME: Video generated successfully!"
 
-          if [ "$(echo "$RESPONSE" | jq -r '.ok')" != "true" ]; then
-            echo "Telegram delivery failed."
-            echo "$RESPONSE" | jq '.description'
-            exit 1
-          fi
-
-          echo "AFTERFRAME video delivered to Telegram!"
+          echo "Video sent to Telegram."
 
       - name: Save generated video
+        if: always() && hashFiles('afterframe-test.mp4') != ''
         uses: actions/upload-artifact@v4
         with:
-          name: afterframe-test-video
-          path: afterframe-test.mp4
+          name: afterframe-generated-video
+          path: |
+            afterframe-test.mp4
+            prediction.json
           retention-days: 7
