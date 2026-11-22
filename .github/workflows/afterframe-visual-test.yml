@@ -1,0 +1,85 @@
+name: AFTERFRAME Visual Test - Projection of Dawn
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  generate-two-previews:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Generate exactly two preview images and send to Telegram
+        env:
+          REPLICATE_API_TOKEN: ${{ secrets.REPLICATE_API_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          set -euo pipefail
+          mkdir -p output
+          python - <<'PY'
+          import os, requests, time
+          token = os.environ["REPLICATE_API_TOKEN"]
+          auth = {"Authorization": f"Bearer {token}"}
+          endpoint = "https://api.replicate.com/v1/models/minimax/image-01/predictions"
+
+          def generate(prompt, filename, subject_reference=None):
+              data = {
+                  "input": {
+                      "prompt": prompt,
+                      "aspect_ratio": "3:4",
+                      "number_of_images": 1,
+                      "prompt_optimizer": False
+                  }
+              }
+              if subject_reference:
+                  data["input"]["subject_reference"] = subject_reference
+              headers = {**auth, "Content-Type": "application/json", "Prefer": "wait=60"}
+              response = requests.post(endpoint, headers=headers, json=data, timeout=90)
+              response.raise_for_status()
+              prediction = response.json()
+              for _ in range(30):
+                  if prediction.get("status") in ("succeeded", "failed", "canceled"):
+                      break
+                  time.sleep(5)
+                  prediction = requests.get(prediction["urls"]["get"], headers=auth, timeout=30).json()
+              if prediction.get("status") != "succeeded":
+                  raise RuntimeError(f"Generation failed: {prediction.get('error') or prediction.get('status')}")
+              image_url = prediction["output"][0]
+              image = requests.get(image_url, timeout=60)
+              image.raise_for_status()
+              with open(filename, "wb") as f:
+                  f.write(image.content)
+              return image_url
+
+          keeper_prompt = """Character reference portrait, full upper body, of The Horizon Keeper: a tall, thin elderly male artisan in a bleak monumental dystopia. He wears a heavy worn leather apron stained with grease, a climbing harness, layered insulated wool clothing, dark leather gloves, a practical respirator covering the lower face, and distinctive brass goggles catching amber reflections. Weathered posture, quiet precision, not a superhero, no weapons. Textured 2.5D tempera and oil painting, tangible impasto, visible linen canvas weave, expressive layered brushstrokes, painterly edges, dramatic chiaroscuro. Palette: graphite, slate, zinc and deep indigo shadows with restrained cadmium orange, molten ochre and carmine reflected light. Premium art direction, cinematic vertical composition, detailed painterly materials. No text, no typography, no logos, no photorealism, no anime, no glossy CGI."""
+
+          scene_prompt = """A cinematic vertical establishing frame for an original dystopian animated short, on a narrow metal gantry suspended between colossal brutalist towers above an endless vertical city abyss. The same elderly Horizon Keeper from the supplied character reference stands small but clearly readable on the gantry, holding a long pole with an enormous paintbrush; thick glowing molten-gold paint drips from its bristles down into the abyss. Composition leads from his silhouette toward the immense indigo depth. A monumental stitched canvas sky hangs nearby, its upper edge faintly glowing with an artificial dawn. Textured 2.5D tempera and oil painting, tangible impasto oil and tempera, visible linen weave, expressive layered brushstrokes, carefully composed painterly shapes. Strong vertical color division: cold graphite/slate/zinc/deep indigo below, radiant cadmium orange/molten ochre/carmine above. Atmospheric haze, monumental scale, beautiful controlled chiaroscuro, premium cinematic art direction. Preserve the character design and clothing from the reference. No text, no subtitles, no logos, no photorealism, no anime, no glossy CGI."""
+
+          keeper_url = generate(keeper_prompt, "output/01_horizon_keeper.jpg")
+          generate(scene_prompt, "output/02_scene01_gantry.jpg", keeper_url)
+
+          bot = os.environ["TELEGRAM_BOT_TOKEN"]
+          chat = os.environ["TELEGRAM_CHAT_ID"]
+          for filename, caption in [
+              ("output/01_horizon_keeper.jpg", "AFTERFRAME — «Проекция зари»: эталон Смотрителя"),
+              ("output/02_scene01_gantry.jpg", "AFTERFRAME — «Проекция зари»: сцена 1, 0–6 секунд")
+          ]:
+              with open(filename, "rb") as photo:
+                  result = requests.post(
+                      f"https://api.telegram.org/bot{bot}/sendPhoto",
+                      data={"chat_id": chat, "caption": caption},
+                      files={"photo": photo},
+                      timeout=60
+                  )
+              result.raise_for_status()
+              if not result.json().get("ok"):
+                  raise RuntimeError("Telegram delivery failed")
+          print("SUCCESS: exactly two images generated and sent. No video generation.")
+          PY
+      - name: Save preview images
+        uses: actions/upload-artifact@v4
+        with:
+          name: afterframe-projection-zari-two-previews
+          path: output/*.jpg
+          retention-days: 7
+          
