@@ -1,0 +1,129 @@
+
+name: AFTERFRAME Visual Inspector
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/5 * * * *"
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: afterframe-visual-inspector
+  cancel-in-progress: false
+
+jobs:
+  receive-images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+
+    steps:
+      - name: Restore Telegram update position
+        uses: actions/cache/restore@v4
+        with:
+          path: .telegram-state
+          key: telegram-offset-${{ github.run_id }}
+          restore-keys: |
+            telegram-offset-
+
+      - name: Receive images from Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          set -euo pipefail
+          mkdir -p .telegram-state received
+
+          python - <<'PY'
+          import os, json, requests
+          from pathlib import Path
+
+          token = os.environ["TELEGRAM_BOT_TOKEN"]
+          allowed_chat = str(os.environ["TELEGRAM_CHAT_ID"])
+          base = f"https://api.telegram.org/bot{token}"
+
+          offset_file = Path(".telegram-state/offset.txt")
+          offset = int(offset_file.read_text().strip()) if offset_file.exists() else 0
+
+          response = requests.get(
+              f"{base}/getUpdates",
+              params={"offset": offset, "timeout": 10, "allowed_updates": json.dumps(["message"])},
+              timeout=25
+          )
+          response.raise_for_status()
+          updates = response.json()
+          if not updates.get("ok"):
+              raise RuntimeError("Telegram getUpdates failed")
+
+          received = 0
+          for update in updates["result"]:
+              offset = max(offset, update["update_id"] + 1)
+              message = update.get("message", {})
+              chat_id = str(message.get("chat", {}).get("id", ""))
+
+              if chat_id != allowed_chat:
+                  continue
+
+              photos = message.get("photo", [])
+              document = message.get("document", {})
+              file_id = None
+              extension = ".jpg"
+
+              if photos:
+                  file_id = photos[-1]["file_id"]
+              elif document.get("mime_type", "").startswith("image/"):
+                  file_id = document["file_id"]
+                  extension = Path(document.get("file_name", "image.jpg")).suffix or ".jpg"
+
+              if not file_id:
+                  continue
+
+              info = requests.get(
+                  f"{base}/getFile",
+                  params={"file_id": file_id},
+                  timeout=30
+              )
+              info.raise_for_status()
+              file_path = info.json()["result"]["file_path"]
+
+              image = requests.get(
+                  f"https://api.telegram.org/file/bot{token}/{file_path}",
+                  timeout=60
+              )
+              image.raise_for_status()
+
+              filename = f"received/telegram_{message.get('message_id')}{extension}"
+              Path(filename).write_bytes(image.content)
+              received += 1
+
+              requests.post(
+                  f"{base}/sendMessage",
+                  json={
+                      "chat_id": allowed_chat,
+                      "text": "AFTERFRAME: изображение получено и сохранено для проверки. AI-анализ пока выключен."
+                  },
+                  timeout=30
+              ).raise_for_status()
+
+          offset_file.parent.mkdir(exist_ok=True)
+          offset_file.write_text(str(offset))
+          print(f"Images received: {received}")
+          PY
+
+      - name: Save received images
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: afterframe-received-images-${{ github.run_id }}
+          path: received/*
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Save Telegram update position
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .telegram-state
+          key: telegram-offset-${{ github.run_id }}
