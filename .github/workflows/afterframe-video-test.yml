@@ -25,7 +25,8 @@ jobs:
 
           echo "Starting AFTERFRAME video generation..."
 
-          RESPONSE=$(curl -sS -X POST \
+          RESPONSE=$(curl --fail-with-body -sS \
+            -X POST \
             "https://api.replicate.com/v1/models/minimax/video-01/predictions" \
             -H "Authorization: Bearer $REPLICATE_API_TOKEN" \
             -H "Content-Type: application/json" \
@@ -47,24 +48,29 @@ jobs:
 
           echo "Prediction created."
 
-          for i in $(seq 1 45); do
-            RESPONSE=$(curl -sS \
-              -H "Authorization: Bearer $REPLICATE_API_TOKEN" \
-              "https://api.replicate.com/v1/predictions/$ID")
+          STATUS=$(echo "$RESPONSE" | jq -r '.status // empty')
 
-            STATUS=$(echo "$RESPONSE" | jq -r '.status // empty')
-            echo "Generation status: $STATUS"
+          for i in $(seq 1 45); do
 
             if [ "$STATUS" = "succeeded" ]; then
               break
             fi
 
             if [ "$STATUS" = "failed" ] || [ "$STATUS" = "canceled" ]; then
-              echo "$RESPONSE" | jq -r '.error // "Generation failed"'
+              echo "Generation failed."
+              echo "$RESPONSE" | jq -r '.error // "Unknown error"'
               exit 1
             fi
 
             sleep 10
+
+            RESPONSE=$(curl --fail-with-body -sS \
+              -H "Authorization: Bearer $REPLICATE_API_TOKEN" \
+              "https://api.replicate.com/v1/predictions/$ID")
+
+            STATUS=$(echo "$RESPONSE" | jq -r '.status // empty')
+
+            echo "Generation status: $STATUS"
           done
 
           if [ "$STATUS" != "succeeded" ]; then
@@ -72,22 +78,41 @@ jobs:
             exit 1
           fi
 
+          echo "Video generation succeeded!"
+
           VIDEO_URL=$(echo "$RESPONSE" | jq -r '
             .output |
             if type == "array" then .[0]
             elif type == "string" then .
-            elif type == "object" then (.video // .url // empty)
+            elif type == "object" then
+              (.video.url // .video // .url // empty)
             else empty end
           ')
 
           if [ -z "$VIDEO_URL" ] || [ "$VIDEO_URL" = "null" ]; then
-            echo "Video URL not found."
+            echo "Video URL not found in Replicate output."
+            echo "Output structure:"
+            echo "$RESPONSE" | jq '.output'
             exit 1
           fi
 
-          curl -L -f "$VIDEO_URL" -o afterframe-test.mp4
-        
-             echo "Video successfully downloaded."
+          if [[ "$VIDEO_URL" != https://* ]]; then
+            echo "Invalid video URL."
+            exit 1
+          fi
+
+          echo "Downloading generated video..."
+
+          curl --fail-with-body -L -sS \
+            "$VIDEO_URL" \
+            -o afterframe-test.mp4
+
+          if [ ! -s afterframe-test.mp4 ]; then
+            echo "Downloaded video is empty."
+            exit 1
+          fi
+
+          echo "Video successfully downloaded."
 
       - name: Send video to Telegram
         env:
@@ -96,7 +121,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          RESPONSE=$(curl -sS -X POST \
+          RESPONSE=$(curl --fail-with-body -sS \
+            -X POST \
             "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendVideo" \
             -F "chat_id=${TELEGRAM_CHAT_ID}" \
             -F "video=@afterframe-test.mp4" \
@@ -109,3 +135,10 @@ jobs:
           fi
 
           echo "AFTERFRAME video delivered to Telegram!"
+
+      - name: Save generated video
+        uses: actions/upload-artifact@v4
+        with:
+          name: afterframe-test-video
+          path: afterframe-test.mp4
+          retention-days: 7
