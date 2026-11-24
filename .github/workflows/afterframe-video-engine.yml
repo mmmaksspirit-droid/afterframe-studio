@@ -8,22 +8,43 @@ on:
         description: "Paste the complete scene-plan.json content"
         required: true
         type: string
+      visual_approval:
+        description: "Paste visual-approval.json. All 10 keyframes must be approved."
+        required: true
+        type: string
+
+permissions:
+  contents: read
 
 jobs:
   validate-video-plan:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Validate scene plan
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Prepare submitted files
         env:
           SCENE_PLAN: ${{ inputs.scene_plan }}
+          VISUAL_APPROVAL: ${{ inputs.visual_approval }}
         run: |
           set -euo pipefail
-
           printf '%s' "$SCENE_PLAN" > scene-plan.json
+          printf '%s' "$VISUAL_APPROVAL" > visual-approval.json
+          python -m json.tool scene-plan.json > /dev/null
+          python -m json.tool visual-approval.json > /dev/null
 
-          echo "Checking AFTERFRAME scene plan..."
+      - name: Validate visual approval
+        run: python scripts/afterframe-approval-gate.py
 
+      - name: Validate 59-second scene plan
+        run: |
+          set -euo pipefail
           jq -e '
             .total_duration_seconds == 59 and
             (.shots | length) == 10 and
@@ -38,8 +59,6 @@ jobs:
             )
           ' scene-plan.json > /dev/null
 
-          echo "Scene plan validation successful!"
-
           jq '{
             episode_title,
             visual_style,
@@ -52,15 +71,16 @@ jobs:
             }]
           }' scene-plan.json > video-production-plan.json
 
-          echo "Estimated generation cost: approximately 5 USD"
-          echo "This is a dry run. No video generation was started."
+          echo "Plan and visual approval validated."
+          echo "DRY RUN ONLY — no video generation and no paid API calls."
 
-      - name: Save production plan
+      - name: Save production plan and approvals
         uses: actions/upload-artifact@v4
         with:
           name: afterframe-video-production-plan
           path: |
             scene-plan.json
+            visual-approval.json
             video-production-plan.json
           retention-days: 7
 
@@ -70,11 +90,8 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           set -euo pipefail
-
           TITLE=$(jq -r '.episode_title' scene-plan.json)
-
-          MESSAGE="AFTERFRAME VIDEO ENGINE: Plan validated successfully. Episode: ${TITLE}. 10 shots, 59 seconds. Dry run only: no paid video generation."
-
+          MESSAGE="AFTERFRAME: plan validated; all 10 keyframes marked approved. Episode: ${TITLE}. 59 seconds. DRY RUN ONLY — no video generation."
           curl --fail-with-body -sS \
             -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             -d "chat_id=${TELEGRAM_CHAT_ID}" \
