@@ -1,0 +1,81 @@
+name: AFTERFRAME — Generate Keyframe 01 (single image)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  generate-keyframe-01:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Generate exactly one 9:16 keyframe
+        env:
+          REPLICATE_API_TOKEN: ${{ secrets.REPLICATE_API_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          set -euo pipefail
+          mkdir -p output
+          python - <<'PY'
+          import os, requests, time
+          from PIL import Image
+          token = os.environ["REPLICATE_API_TOKEN"]
+          auth = {"Authorization": f"Bearer {token}"}
+          endpoint = "https://api.replicate.com/v1/models/minimax/image-01/predictions"
+
+          prompt = """AFTERFRAME — «Проекция зари», ключевой кадр сцены 1 (0–6 секунд).
+          A cinematic vertical 9:16 establishing frame on a narrow metal gantry suspended between colossal brutalist towers above an endless vertical city abyss. The same elderly Horizon Keeper as in the supplied character reference stands on the gantry, clearly readable but small within the monumental environment. He is a tall, thin elderly male artisan wearing a heavy worn leather apron stained with grease, a climbing harness, layered insulated wool clothing, dark leather gloves, a practical respirator covering the lower face, and distinctive brass goggles catching amber reflections. He holds a long pole with an enormous paintbrush; thick glowing molten-gold paint drips from its bristles down into the abyss. The composition leads from his silhouette and the brush toward the immense indigo depth. A monumental stitched canvas sky hangs nearby, subtly glowing with an artificial dawn.
+          Textured 2.5D tempera and oil painting, tangible impasto oil and tempera, visible linen weave, expressive layered brushstrokes, painterly edges. Strong vertical color division: cold graphite, slate, zinc and deep indigo below; radiant cadmium orange, molten ochre and restrained carmine above. Atmospheric haze, monumental scale, beautiful controlled chiaroscuro, premium cinematic art direction. Preserve the character design and clothing from the reference. Vertical composition designed natively for 9:16, not cropped from landscape. No text, no subtitles, no logos, no photorealism, no anime, no glossy CGI."""
+
+          payload = {
+              "input": {
+                  "prompt": prompt,
+                  "aspect_ratio": "9:16",
+                  "number_of_images": 1,
+                  "prompt_optimizer": False,
+                  "subject_reference": "https://i.ibb.co.com/kgcBfcP1/IMG-20261123-031439-301.jpg"
+              }
+          }
+          headers = {**auth, "Content-Type": "application/json", "Prefer": "wait=60"}
+          response = requests.post(endpoint, headers=headers, json=payload, timeout=90)
+          response.raise_for_status()
+          prediction = response.json()
+          for _ in range(36):
+              if prediction.get("status") in ("succeeded", "failed", "canceled"):
+                  break
+              time.sleep(5)
+              prediction = requests.get(prediction["urls"]["get"], headers=auth, timeout=30).json()
+          if prediction.get("status") != "succeeded":
+              raise RuntimeError(f"Generation failed: {prediction.get('error') or prediction.get('status')}")
+          image_url = prediction["output"][0]
+          image = requests.get(image_url, timeout=60)
+          image.raise_for_status()
+          with open("output/scene-01-keyframe.jpg", "wb") as f:
+              f.write(image.content)
+
+          with Image.open("output/scene-01-keyframe.jpg") as im:
+              w, h = im.size
+              ratio = w / h
+              print(f"Generated image: {w}x{h}, ratio={ratio:.5f}")
+              if abs(ratio - (9/16)) > 0.012:
+                  raise RuntimeError("BLOCKED: generated image is not native 9:16; not approved for production.")
+          bot = os.environ["TELEGRAM_BOT_TOKEN"]
+          chat = os.environ["TELEGRAM_CHAT_ID"]
+          with open("output/scene-01-keyframe.jpg", "rb") as photo:
+              result = requests.post(
+                  f"https://api.telegram.org/bot{bot}/sendPhoto",
+                  data={"chat_id": chat, "caption": "AFTERFRAME — «Проекция зари»: кадр 1/10, черновой предпросмотр 9:16. Нужна художественная проверка."},
+                  files={"photo": photo},
+                  timeout=60
+              )
+          result.raise_for_status()
+          if not result.json().get("ok"):
+              raise RuntimeError("Telegram delivery failed")
+          print("SUCCESS: exactly one image generated, verified for 9:16, and sent to Telegram. No video generation.")
+          PY
+      - name: Save keyframe preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: afterframe-scene-01-keyframe-9x16
+          path: output/scene-01-keyframe.jpg
+          retention-days: 7
