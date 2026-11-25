@@ -1,0 +1,84 @@
+
+name: AFTERFRAME KEYFRAME PREFLIGHT
+
+on:
+  workflow_dispatch:
+    inputs:
+      manifest:
+        description: "JSON manifest with 10 approved keyframes"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check requests Pillow
+
+      - name: Write manifest safely
+        env:
+          MANIFEST_JSON: ${{ inputs.manifest }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          Path("keyframes-manifest.json").write_text(
+              os.environ["MANIFEST_JSON"], encoding="utf-8"
+          )
+          PY
+
+      - name: Validate manifest and images
+        run: |
+          python -m json.tool keyframes-manifest.json > /dev/null
+          python scripts/afterframe-keyframe-preflight.py \
+            --manifest keyframes-manifest.json \
+            --output keyframe-preflight-report.json \
+            --download-dir verified-keyframes
+
+      - name: Upload verified frames and report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: afterframe-keyframe-preflight
+          path: |
+            keyframe-preflight-report.json
+            verified-keyframes/
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Telegram notification
+        if: always()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "Telegram secrets are not configured; skipping notification."
+            exit 0
+          fi
+
+          if [ "$JOB_STATUS" = "success" ]; then
+            MESSAGE="AFTERFRAME: KEYFRAME PREFLIGHT PASSED. All 10 approved frames are reachable, at least 540x960, and 9:16. No generation or paid operation was performed."
+          else
+            MESSAGE="AFTERFRAME: KEYFRAME PREFLIGHT BLOCKED. Check the GitHub Actions log for the failing frame. No generation or paid operation was performed."
+          fi
+
+          curl --fail --silent --show-error \
+            --request POST \
+            --data-urlencode "chat_id=$TELEGRAM_CHAT_ID" \
+            --data-urlencode "text=$MESSAGE" \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage"
