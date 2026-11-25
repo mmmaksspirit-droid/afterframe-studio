@@ -8,6 +8,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip requests Pillow
       - name: Generate exactly one 9:16 keyframe
         env:
           REPLICATE_API_TOKEN: ${{ secrets.REPLICATE_API_TOKEN }}
@@ -16,7 +22,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p output
-          python - <<'PY'
+          python - <<'PYCODE'
           import os, requests, time
           from PIL import Image
           token = os.environ["REPLICATE_API_TOKEN"]
@@ -27,15 +33,7 @@ jobs:
           A cinematic vertical 9:16 establishing frame on a narrow metal gantry suspended between colossal brutalist towers above an endless vertical city abyss. The same elderly Horizon Keeper as in the supplied character reference stands on the gantry, clearly readable but small within the monumental environment. He is a tall, thin elderly male artisan wearing a heavy worn leather apron stained with grease, a climbing harness, layered insulated wool clothing, dark leather gloves, a practical respirator covering the lower face, and distinctive brass goggles catching amber reflections. He holds a long pole with an enormous paintbrush; thick glowing molten-gold paint drips from its bristles down into the abyss. The composition leads from his silhouette and the brush toward the immense indigo depth. A monumental stitched canvas sky hangs nearby, subtly glowing with an artificial dawn.
           Textured 2.5D tempera and oil painting, tangible impasto oil and tempera, visible linen weave, expressive layered brushstrokes, painterly edges. Strong vertical color division: cold graphite, slate, zinc and deep indigo below; radiant cadmium orange, molten ochre and restrained carmine above. Atmospheric haze, monumental scale, beautiful controlled chiaroscuro, premium cinematic art direction. Preserve the character design and clothing from the reference. Vertical composition designed natively for 9:16, not cropped from landscape. No text, no subtitles, no logos, no photorealism, no anime, no glossy CGI."""
 
-          payload = {
-              "input": {
-                  "prompt": prompt,
-                  "aspect_ratio": "9:16",
-                  "number_of_images": 1,
-                  "prompt_optimizer": False,
-                  "subject_reference": "https://i.ibb.co.com/kgcBfcP1/IMG-20261123-031439-301.jpg"
-              }
-          }
+          payload = {"input": {"prompt": prompt, "aspect_ratio": "9:16", "number_of_images": 1, "prompt_optimizer": False, "subject_reference": "https://i.ibb.co.com/kgcBfcP1/IMG-20261123-031439-301.jpg"}}
           headers = {**auth, "Content-Type": "application/json", "Prefer": "wait=60"}
           response = requests.post(endpoint, headers=headers, json=payload, timeout=90)
           response.raise_for_status()
@@ -52,7 +50,6 @@ jobs:
           image.raise_for_status()
           with open("output/scene-01-keyframe.jpg", "wb") as f:
               f.write(image.content)
-
           with Image.open("output/scene-01-keyframe.jpg") as im:
               w, h = im.size
               ratio = w / h
@@ -62,17 +59,12 @@ jobs:
           bot = os.environ["TELEGRAM_BOT_TOKEN"]
           chat = os.environ["TELEGRAM_CHAT_ID"]
           with open("output/scene-01-keyframe.jpg", "rb") as photo:
-              result = requests.post(
-                  f"https://api.telegram.org/bot{bot}/sendPhoto",
-                  data={"chat_id": chat, "caption": "AFTERFRAME — «Проекция зари»: кадр 1/10, черновой предпросмотр 9:16. Нужна художественная проверка."},
-                  files={"photo": photo},
-                  timeout=60
-              )
+              result = requests.post(f"https://api.telegram.org/bot{bot}/sendPhoto", data={"chat_id": chat, "caption": "AFTERFRAME — «Проекция зари»: кадр 1/10, черновой предпросмотр 9:16. Нужна художественная проверка."}, files={"photo": photo}, timeout=60)
           result.raise_for_status()
           if not result.json().get("ok"):
               raise RuntimeError("Telegram delivery failed")
           print("SUCCESS: exactly one image generated, verified for 9:16, and sent to Telegram. No video generation.")
-          PY
+          PYCODE
       - name: Save keyframe preview
         uses: actions/upload-artifact@v4
         with:
