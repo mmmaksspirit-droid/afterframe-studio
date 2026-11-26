@@ -28,12 +28,11 @@ jobs:
           token = os.environ["REPLICATE_API_TOKEN"]
           auth = {"Authorization": f"Bearer {token}"}
           endpoint = "https://api.replicate.com/v1/models/minimax/image-01/predictions"
-
           prompt = """AFTERFRAME — «Проекция зари», ключевой кадр сцены 1 (0–6 секунд).
           A cinematic vertical 9:16 establishing frame on a narrow metal gantry suspended between colossal brutalist towers above an endless vertical city abyss. The same elderly Horizon Keeper as in the supplied character reference stands on the gantry, clearly readable but small within the monumental environment. He is a tall, thin elderly male artisan wearing a heavy worn leather apron stained with grease, a climbing harness, layered insulated wool clothing, dark leather gloves, a practical respirator covering the lower face, and distinctive brass goggles catching amber reflections. He holds a long pole with an enormous paintbrush; thick glowing molten-gold paint drips from its bristles down into the abyss. The composition leads from his silhouette and the brush toward the immense indigo depth. A monumental stitched canvas sky hangs nearby, subtly glowing with an artificial dawn.
           Textured 2.5D tempera and oil painting, tangible impasto oil and tempera, visible linen weave, expressive layered brushstrokes, painterly edges. Strong vertical color division: cold graphite, slate, zinc and deep indigo below; radiant cadmium orange, molten ochre and restrained carmine above. Atmospheric haze, monumental scale, beautiful controlled chiaroscuro, premium cinematic art direction. Preserve the character design and clothing from the reference. Vertical composition designed natively for 9:16, not cropped from landscape. No text, no subtitles, no logos, no photorealism, no anime, no glossy CGI."""
-
-          payload = {"input": {"prompt": prompt, "aspect_ratio": "9:16", "number_of_images": 1, "prompt_optimizer": False, "subject_reference": "https://i.ibb.co.com/kgcBfcP1/IMG-20261123-031439-301.jpg"}}
+          reference_url = "https://raw.githubusercontent.com/mmmaksspirit-droid/afterframe-studio/main/file_00000000cf1c81f48a9cd05b1f6ee52d.webp"
+          payload = {"input": {"prompt": prompt, "aspect_ratio": "9:16", "number_of_images": 1, "prompt_optimizer": False, "subject_reference": reference_url}}
           headers = {**auth, "Content-Type": "application/json", "Prefer": "wait=60"}
           response = requests.post(endpoint, headers=headers, json=payload, timeout=90)
           response.raise_for_status()
