@@ -1,0 +1,96 @@
+{
+  "episode_title": "Проекция зари",
+  "episode_slug": "projection-of-dawn",
+  "visual_style": "Textured 2.5D Tempera & Oil Painting Dystopia",
+  "aspect_ratio": "9:16",
+  "total_duration_seconds": 59,
+  "audio": {
+    "narration": "calm Russian voiceover, added separately",
+    "character_dialogue": false,
+    "music": false,
+    "subtitles": false,
+    "in_video_text": false
+  },
+  "shots": [
+    {
+      "shot": 1,
+      "start_second": 0,
+      "duration_seconds": 6,
+      "image_file": "keyframes/shot-01.png",
+      "visual": "The Horizon Keeper stands on a narrow metal gantry above a vast abyss, holding a long pole with an enormous wet brush; golden paint drips from the bristles. A colossal orange glowing canvas hangs between brutalist towers.",
+      "voiceover": "Каждое утро требует безупречной точности."
+    },
+    {
+      "shot": 2,
+      "start_second": 6,
+      "duration_seconds": 6,
+      "image_file": "keyframes/shot-02.png",
+      "visual": "The Keeper pulls a heavy iron lever. Rusted winches tighten steel cables and slowly raise the enormous stitched canvas between the towers.",
+      "voiceover": ""
+    },
+    {
+      "shot": 3,
+      "start_second": 12,
+      "duration_seconds": 6,
+      "image_file": "keyframes/shot-03.png",
+      "visual": "The Keeper paints the dark fabric with broad rhythmic strokes of molten ochre and carmine, building an artificial fiery dawn.",
+      "voiceover": "Правильная плотность охры."
+    },
+    {
+      "shot": 4,
+      "start_second": 18,
+      "duration_seconds": 6,
+      "image_file": "keyframes/shot-04.png",
+      "visual": "Extreme close-up of brush bristles pressing thick golden-orange pigment into coarse linen fibers; the painted solar corona glows behind the texture.",
+      "voiceover": "Уверенный угол преломления света."
+    },
+    {
+      "shot": 5,
+      "start_second": 24,
+      "duration_seconds": 6,
+      "image_file": "keyframes/shot-05.png",
+      "visual": "Close portrait of the elderly Keeper inspecting the work; the artificial sunrise is reflected in worn brass goggles with amber lenses.",
+      "voiceover": ""
+    },
+    {
+      "shot": 6,
+      "start_second": 30,
+      "duration_seconds": 6,
+      "image_file": "keyframes/shot-06.png",
+      "visual": "From behind, the Keeper steps back on the high gantry and looks at the immense painted sunrise suspended over the city.",
+      "voiceover": "Люди внизу открывают окна и верят, что новый день всегда наступает сам по себе."
+    },
+    {
+      "shot": 7,
+      "start_second": 36,
+      "duration_seconds": 6,
+      "image_file": "keyframes/shot-07.png",
+      "visual": "A vertiginous top-down view of the monumental city far below; tiny windows open and catch the warm golden light from the artificial dawn.",
+      "voiceover": "Они не замечают грубых швов на ткани неба."
+    },
+    {
+      "shot": 8,
+      "start_second": 42,
+      "duration_seconds": 6,
+      "image_file": "keyframes/shot-08.png",
+      "visual": "The camera moves around the canvas edge, revealing the contrast between its glowing painted front and its cold crude backside: stitches, ropes, rusted beams and icy rivets.",
+      "voiceover": "И это милосердно."
+    },
+    {
+      "shot": 9,
+      "start_second": 48,
+      "duration_seconds": 6,
+      "image_file": "keyframes/shot-09.png",
+      "visual": "The camera passes behind the canvas. Its orange reverse side, seams and metal frame fill the foreground; beyond them lies dead cosmic emptiness, shattered atmospheric domes and crystalline ice dust.",
+      "voiceover": "Ведь за полотном..."
+    },
+    {
+      "shot": 10,
+      "start_second": 54,
+      "duration_seconds": 5,
+      "image_file": "keyframes/shot-10.png",
+      "visual": "A distant dead obsidian Sun split by fiery cracks hangs in the void. The tiny glowing orange canvas remains at the left, illuminating the city like the last surviving spark.",
+      "voiceover": "...больше некому согреть их взгляды."
+    }
+  ]
+}
